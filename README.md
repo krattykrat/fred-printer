@@ -1,8 +1,8 @@
 <img src="./images/freds.png" width="600" alt="freds">
 
-<br>
 
-<br>
+
+## Fred Printer 
 
 This Meteor module lets us print an enormous variety of Freds in massive quantities!
 
