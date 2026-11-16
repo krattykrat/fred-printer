@@ -568,7 +568,6 @@ public class StatuePrinter extends Module {
             if (!InvUtils.swap(hotbarSlot, true)) return;
             BlockHitResult hit = new BlockHitResult(s.hit(), s.face(), s.pos(), false);
             mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hit);
-            mc.player.swing(InteractionHand.MAIN_HAND);
             InvUtils.swapBack();
         };
 
