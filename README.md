@@ -1,5 +1,3 @@
-[realese page](https://github.com/krattykrat/fred-printer/releases)
-
 <img src="./images/freds.png" width="600" alt="freds">
 
 # Fred Printer 
