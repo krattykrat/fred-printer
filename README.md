@@ -1,8 +1,9 @@
+[realese page](https://github.com/krattykrat/fred-printer/releases)
+
 <img src="./images/freds.png" width="600" alt="freds">
 
-
-
-## Fred Printer 
+# Fred Printer 
+### [release page](https://github.com/krattykrat/fred-printer/releases)
 
 This Meteor module lets us print an enormous variety of Freds in massive quantities!
 
