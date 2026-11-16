@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "fred-printer",
+  "version": "${version}",
+  "name": "Fred Printer",
+  "description": "Prints randomized statues from a structure file using blocks picked from your inventory.",
+  "authors": [
+    "Fred"
+  ],
+  "icon": "assets/fred-printer/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "meteor": [
+      "com.example.addon.FredPrinter"
+    ]
+  },
+  "custom": {
+    "meteor-client:color": "225,25,25",
+    "modmenu": {
+      "parent": {
+        "id": "meteor-client"
+      }
+    }
+  },
+  "depends": {
+    "java": ">=${jdk_version}",
+    "minecraft": "${minecraft_version}",
+    "meteor-client": "*"
+  }
+}
