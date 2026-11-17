@@ -65,7 +65,7 @@ public class StatuePrinter extends Module {
 
     private final Setting<BlockPos> origin = sg.add(new BlockPosSetting.Builder()
         .name("origin").description("Minimum corner (min x,y,z) of the structure")
-        .defaultValue(BlockPos.ZERO).visible(() -> anchor.get() == Anchor.MANUAL).build());
+        .defaultValue(BlockPos.ORIGIN).visible(() -> anchor.get() == Anchor.MANUAL).build());
 
     private final Setting<Boolean> centerOnAnchor = sg.add(new BoolSetting.Builder()
         .name("center-on-anchor").description("Shift the structure so its horizontal center sits on the anchor (e.g. on you) instead of its corner")
@@ -413,8 +413,8 @@ public class StatuePrinter extends Module {
         Block b = bi.getBlock();
         if (b instanceof FallingBlock || b instanceof BlockEntityProvider) return false;
         var st = b.getDefaultState();
-        if (allowPartial.get()) return !st.getCollisionShape(mc.world, BlockPos.ZERO).isEmpty();
-        return st.isFullCube(mc.world, BlockPos.ZERO);
+        if (allowPartial.get()) return !st.getCollisionShape(mc.world, BlockPos.ORIGIN).isEmpty();
+        return st.isFullCube(mc.world, BlockPos.ORIGIN);
     }
 
     // ---------- Main loop ----------

@@ -5,6 +5,8 @@
 
 This Meteor module lets us print an enormous variety of Freds in massive quantities!
 
+**This branch targets Minecraft 1.21.11** (Fabric, Yarn mappings, Meteor Client `1.21.11-SNAPSHOT`, Java 21).
+
 How to use :
 - put the fred.nbt file into .minecraft\meteor-client\statues (create the "statues" folder if it doesn't exist yet)
 - configure the settings, Fred printer is in mics category. (i recommend turning on chat messages the first time you use it)
