@@ -8,23 +8,23 @@ import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtAccounter;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtList;
+import net.minecraft.nbt.NbtSizeTracker;
 import net.minecraft.nbt.NbtIo;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.EntityBlock;
-import net.minecraft.world.level.block.FallingBlock;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.util.Hand;
+import net.minecraft.item.BlockItem;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockEntityProvider;
+import net.minecraft.block.FallingBlock;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.Vec3d;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -154,12 +154,12 @@ public class StatuePrinter extends Module {
     }
 
     // Where and how we click to place a block.
-    private record Support(BlockPos pos, Direction face, Vec3 hit) {}
+    private record Support(BlockPos pos, Direction face, Vec3d hit) {}
 
     // A cell that can be placed right now, with the click to use and its distance.
     private record Candidate(Placement pl, Support sup, double dist) {}
 
-    private Vec3 lastPlayerPos;
+    private Vec3d lastPlayerPos;
     private double okMax, failMin;   // farthest confirmed placement / nearest repeatedly failed one
 
     private State state;
@@ -180,17 +180,17 @@ public class StatuePrinter extends Module {
 
     @Override
     public void onActivate() {
-        if (mc.player == null || mc.level == null) { toggle(); return; }
+        if (mc.player == null || mc.world == null) { toggle(); return; }
 
         BlockPos base;
         if (anchor.get() == Anchor.PLAYER) {
-            base = mc.player.blockPosition();   // the block you are standing in
+            base = mc.player.getBlockPos();   // the block you are standing in
         } else if (anchor.get() == Anchor.CROSSHAIR) {
-            if (mc.hitResult instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK) {
+            if (mc.crosshairTarget instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK) {
                 BlockPos hitPos = hit.getBlockPos();
                 // Replaceable blocks (snow layer, tall grass, ...) vanish when a block is placed,
                 // so treat them as air: the structure starts at their position, not above them.
-                base = mc.level.getBlockState(hitPos).canBeReplaced() ? hitPos : hitPos.above();
+                base = mc.world.getBlockState(hitPos).isReplaceable() ? hitPos : hitPos.up();
             } else { tellError("Not looking at a block."); toggle(); return; }
         } else base = origin.get();
 
@@ -214,15 +214,15 @@ public class StatuePrinter extends Module {
         if (!Files.exists(path)) { tellError("File not found: " + path); return false; }
 
         try {
-            CompoundTag root = NbtIo.readCompressed(path, NbtAccounter.unlimitedHeap());
-            ListTag palette = root.getListOrEmpty("palette");
-            ListTag blocks = root.getListOrEmpty("blocks");
+            NbtCompound root = NbtIo.readCompressed(path, NbtSizeTracker.ofUnlimitedBytes());
+            NbtList palette = root.getListOrEmpty("palette");
+            NbtList blocks = root.getListOrEmpty("blocks");
 
             // palette state index -> part index (by block name, properties ignored)
             Map<String, Integer> partByName = new LinkedHashMap<>();
             int[] statePart = new int[palette.size()];
             for (int i = 0; i < palette.size(); i++) {
-                String name = palette.getCompoundOrEmpty(i).getStringOr("Name", "minecraft:air");
+                String name = palette.getCompoundOrEmpty(i).getString("Name", "minecraft:air");
                 if (name.equals("minecraft:air") || name.equals("minecraft:structure_void")
                     || name.equals("minecraft:jigsaw") || name.equals("minecraft:structure_block")) {
                     statePart[i] = -1;
@@ -232,9 +232,9 @@ public class StatuePrinter extends Module {
             }
 
             // structure box size (used to keep the rotated structure anchored at its min corner)
-            ListTag size = root.getListOrEmpty("size");
-            int sizeX = Math.max(1, size.getIntOr(0, 1));
-            int sizeZ = Math.max(1, size.getIntOr(2, 1));
+            NbtList size = root.getListOrEmpty("size");
+            int sizeX = Math.max(1, size.getInt(0, 1));
+            int sizeZ = Math.max(1, size.getInt(2, 1));
             int steps = rotationSteps();
 
             // rotate the box corners to find the new min corner
@@ -251,13 +251,13 @@ public class StatuePrinter extends Module {
             int shiftY = offsetY.get();
 
             for (int i = 0; i < blocks.size(); i++) {
-                CompoundTag b = blocks.getCompoundOrEmpty(i);
-                int part = statePart[b.getIntOr("state", 0)];
+                NbtCompound b = blocks.getCompoundOrEmpty(i);
+                int part = statePart[b.getInt("state", 0)];
                 if (part < 0) continue;
-                ListTag p = b.getListOrEmpty("pos");
-                int[] xz = {p.getIntOr(0, 0), p.getIntOr(2, 0)};
+                NbtList p = b.getListOrEmpty("pos");
+                int[] xz = {p.getInt(0, 0), p.getInt(2, 0)};
                 for (int s = 0; s < steps; s++) rotateCw(xz);
-                queue.add(new Placement(base.offset(xz[0] - minX + shiftX, p.getIntOr(1, 0) + shiftY, xz[1] - minZ + shiftZ), part));
+                queue.add(new Placement(base.add(xz[0] - minX + shiftX, p.getInt(1, 0) + shiftY, xz[1] - minZ + shiftZ), part));
             }
 
             partCount = partByName.size();
@@ -267,7 +267,7 @@ public class StatuePrinter extends Module {
             // blocks actually needed per part (positions that are already filled need nothing)
             partNeed = new int[partCount];
             for (Placement pl : queue) {
-                if (mc.level.getBlockState(pl.pos()).canBeReplaced()) partNeed[pl.part()]++;
+                if (mc.world.getBlockState(pl.pos()).isReplaceable()) partNeed[pl.part()]++;
             }
 
             // bottom layer first
@@ -286,7 +286,7 @@ public class StatuePrinter extends Module {
     private int rotationSteps() {
         if (!alignToView.get()) return 0;
         // yaw 0 = south, 90 = west, 180 = north, -90 = east  (matches Facing order)
-        int p = Math.floorMod((int) Math.floor((mc.player.getYRot() + 45f) / 90f), 4);
+        int p = Math.floorMod((int) Math.floor((mc.player.getYaw() + 45f) / 90f), 4);
         int wanted = facingMode.get() == FacingMode.TOWARD_PLAYER ? (p + 2) % 4 : p;
         return Math.floorMod(wanted - front.get().ordinal(), 4);
     }
@@ -303,7 +303,7 @@ public class StatuePrinter extends Module {
         Map<Item, Integer> firstSlot = new LinkedHashMap<>();
         Map<Item, Integer> total = new HashMap<>();   // item -> total count in slots 9-35
         for (int slot = 9; slot <= 35; slot++) {
-            ItemStack s = mc.player.getInventory().getItem(slot);
+            ItemStack s = mc.player.getInventory().getStack(slot);
             if (s.isEmpty() || !isGoodBlock(s)) continue;
             firstSlot.putIfAbsent(s.getItem(), slot);
             total.merge(s.getItem(), s.getCount(), Integer::sum);
@@ -352,7 +352,7 @@ public class StatuePrinter extends Module {
         for (int i = 0; i < partCount; i++) {
             origSlot[i] = firstSlot.get(chosen[i]);
             tellInfo("Part %d -> %s (need %d, have %d)", i,
-                chosen[i].getDefaultInstance().getHoverName().getString(),
+                chosen[i].getDefaultStack().getName().getString(),
                 partNeed[i], total.get(chosen[i]));
         }
         return true;
@@ -364,7 +364,7 @@ public class StatuePrinter extends Module {
 
         total.entrySet().stream()
             .sorted((a, b) -> Integer.compare(b.getValue(), a.getValue())).limit(5)
-            .forEach(e -> tellInfo("Stock: %s x%d", e.getKey().getDefaultInstance().getHoverName().getString(), e.getValue()));
+            .forEach(e -> tellInfo("Stock: %s x%d", e.getKey().getDefaultStack().getName().getString(), e.getValue()));
 
         int maxTotal = Collections.max(total.values());
         for (int i = 0; i < partCount; i++) {
@@ -381,7 +381,7 @@ public class StatuePrinter extends Module {
     private int countInInventory(Item item) {
         int n = 0;
         for (int slot = 0; slot <= 35; slot++) {
-            ItemStack s = mc.player.getInventory().getItem(slot);
+            ItemStack s = mc.player.getInventory().getStack(slot);
             if (s.getItem() == item) n += s.getCount();
         }
         return n;
@@ -411,16 +411,16 @@ public class StatuePrinter extends Module {
     private boolean isGoodBlock(ItemStack s) {
         if (!(s.getItem() instanceof BlockItem bi)) return false;
         Block b = bi.getBlock();
-        if (b instanceof FallingBlock || b instanceof EntityBlock) return false;
-        var st = b.defaultBlockState();
-        if (allowPartial.get()) return !st.getCollisionShape(mc.level, BlockPos.ZERO).isEmpty();
-        return st.isCollisionShapeFullBlock(mc.level, BlockPos.ZERO);
+        if (b instanceof FallingBlock || b instanceof BlockEntityProvider) return false;
+        var st = b.getDefaultState();
+        if (allowPartial.get()) return !st.getCollisionShape(mc.world, BlockPos.ZERO).isEmpty();
+        return st.isFullCube(mc.world, BlockPos.ZERO);
     }
 
     // ---------- Main loop ----------
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.level == null || state == null) return;
+        if (mc.player == null || mc.world == null || state == null) return;
 
         switch (state) {
             case SETUP -> {   // one SWAP per tick: inventory -> hotbar slot "step"
@@ -442,12 +442,12 @@ public class StatuePrinter extends Module {
         // A cell is finished when the world really holds the expected block.
         // A cell taken by some other solid block cannot be filled: drop it (reported at the end).
         queue.removeIf(pl -> {
-            var st = mc.level.getBlockState(pl.pos());
+            var st = mc.world.getBlockState(pl.pos());
             if (st.getBlock() == expectedBlock(pl.part())) {
                 if (pl.tries > 0) okMax = Math.max(okMax, pl.dist);   // server accepted it from this far
                 return true;
             }
-            return !st.canBeReplaced();
+            return !st.isReplaceable();
         });
 
         if (queue.isEmpty()) {
@@ -456,7 +456,7 @@ public class StatuePrinter extends Module {
             return;
         }
 
-        Vec3 eye = mc.player.getEyePosition();
+        Vec3d eye = mc.player.getEyePos();
         double maxDistSq = range.get() * range.get();
         int placed = 0;
 
@@ -467,12 +467,12 @@ public class StatuePrinter extends Module {
             if (age - pl.lastTry < retryDelay.get()) continue;         // waiting for server confirmation
             if (pl.tries >= maxRetries.get()) { failMin = Math.min(failMin, pl.dist); it.remove(); continue; } // skipped this round, re-checked by the sweep
 
-            if (!mc.level.hasChunkAt(pl.pos())) continue;               // chunk not loaded: placing would only desync
+            if (!mc.world.isPosLoaded(pl.pos())) continue;               // chunk not loaded: placing would only desync
             Support sup = findSupport(pl.pos(), eye, maxDistSq);
             if (sup == null) continue;                                  // out of reach or no solid neighbour yet
-            if (mc.player.getBoundingBox().intersects(new AABB(pl.pos()))) continue; // we are standing in it
+            if (mc.player.getBoundingBox().intersects(new Box(pl.pos()))) continue; // we are standing in it
 
-            cands.add(new Candidate(pl, sup, eye.distanceToSqr(sup.hit())));
+            cands.add(new Candidate(pl, sup, eye.squaredDistanceTo(sup.hit())));
         }
         cands.sort(Comparator.comparingDouble(Candidate::dist));   // nearest first, like a printer
 
@@ -481,7 +481,7 @@ public class StatuePrinter extends Module {
             Placement pl = c.pl();
             Support sup = c.sup();
 
-            ItemStack hs = mc.player.getInventory().getItem(pl.part());
+            ItemStack hs = mc.player.getInventory().getStack(pl.part());
             if (hs.isEmpty() || hs.getItem() != chosen[pl.part()]) {   // stack used up -> refill from inventory
                 if (refill(pl.part())) { starveSince[pl.part()] = -1; return; }   // swap sent, check again next tick
 
@@ -490,7 +490,7 @@ public class StatuePrinter extends Module {
                 if (starveSince[pl.part()] < 0) starveSince[pl.part()] = age;
                 if (age - starveSince[pl.part()] > 60) {
                     tellError("Out of blocks: %s (you hold %d of it).",
-                        chosen[pl.part()].getDefaultInstance().getHoverName().getString(),
+                        chosen[pl.part()].getDefaultStack().getName().getString(),
                         countInInventory(chosen[pl.part()]));
                     state = State.RETURN; step = 0; return;
                 }
@@ -508,14 +508,14 @@ public class StatuePrinter extends Module {
         if (placed > 0) { idleTicks = 0; timer = delay.get(); }
         else {
             // Like a printer: while you walk around the statue the timeout keeps resetting.
-            Vec3 now = mc.player.position();
-            if (lastPlayerPos != null && now.distanceToSqr(lastPlayerPos) > 0.01) idleTicks = 0;
+            Vec3d now = mc.player.getEntityPos();
+            if (lastPlayerPos != null && now.squaredDistanceTo(lastPlayerPos) > 0.01) idleTicks = 0;
             lastPlayerPos = now;
 
             idleTicks++;
             if (idleTicks == 40) {
                 double nearest = Double.MAX_VALUE;
-                for (Placement pl : queue) nearest = Math.min(nearest, eye.distanceTo(Vec3.atCenterOf(pl.pos())));
+                for (Placement pl : queue) nearest = Math.min(nearest, eye.distanceTo(Vec3d.ofCenter(pl.pos())));
                 tellWarn("Nothing placeable: %d blocks left, nearest is %.1f blocks away (range %.1f). Walk closer to them.",
                     queue.size(), nearest, range.get());
             } else if (idleTicks > giveUpTicks.get()) {
@@ -528,36 +528,36 @@ public class StatuePrinter extends Module {
     // ---------- Placement ----------
     // Pick a solid neighbour of target to click on. Replaceable blocks (snow layer, grass, ...),
     // fluids, air and block entities are never used, so the click can't replace the wrong cell.
-    private Support findSupport(BlockPos target, Vec3 eye, double maxDistSq) {
+    private Support findSupport(BlockPos target, Vec3d eye, double maxDistSq) {
         Support best = null;
         double bestDist = Double.MAX_VALUE;
 
         if (placeMode.get() != PlaceMode.AIR_ONLY) for (Direction d : Direction.values()) {
-            BlockPos n = target.relative(d);
-            var st = mc.level.getBlockState(n);
-            if (st.isAir() || st.canBeReplaced() || !st.getFluidState().isEmpty()) continue;
-            if (st.getBlock() instanceof EntityBlock) continue;
+            BlockPos n = target.offset(d);
+            var st = mc.world.getBlockState(n);
+            if (st.isAir() || st.isReplaceable() || !st.getFluidState().isEmpty()) continue;
+            if (st.getBlock() instanceof BlockEntityProvider) continue;
 
             Direction face = d.getOpposite();   // face of n that touches target
-            Vec3 normal = new Vec3(face.getStepX(), face.getStepY(), face.getStepZ());
-            Vec3 hit = Vec3.atCenterOf(n).add(normal.scale(0.5));
+            Vec3d normal = new Vec3d(face.getOffsetX(), face.getOffsetY(), face.getOffsetZ());
+            Vec3d hit = Vec3d.ofCenter(n).add(normal.multiply(0.5));
 
-            if (eye.subtract(hit).dot(normal) <= 0) continue;   // face points away from us
-            double dist = eye.distanceToSqr(hit);
+            if (eye.subtract(hit).dotProduct(normal) <= 0) continue;   // face points away from us
+            double dist = eye.squaredDistanceTo(hit);
             if (dist > maxDistSq) continue;
 
             if (dist < bestDist) { bestDist = dist; best = new Support(n, face, hit); }
         }
         // Air place: click the (replaceable) target cell itself; the server places the block right there.
         if (best == null && placeMode.get() != PlaceMode.SUPPORT_ONLY) {
-            Vec3 center = Vec3.atCenterOf(target);
-            Vec3 d = eye.subtract(center);
+            Vec3d center = Vec3d.ofCenter(target);
+            Vec3d d = eye.subtract(center);
             double ax = Math.abs(d.x), ay = Math.abs(d.y), az = Math.abs(d.z);
             Direction face = (ay >= ax && ay >= az) ? (d.y >= 0 ? Direction.UP : Direction.DOWN)
                 : (ax >= az) ? (d.x >= 0 ? Direction.EAST : Direction.WEST)
                 : (d.z >= 0 ? Direction.SOUTH : Direction.NORTH);
-            Vec3 hit = center.add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
-            if (eye.distanceToSqr(hit) <= maxDistSq) best = new Support(target, face, hit);
+            Vec3d hit = center.add(face.getOffsetX() * 0.5, face.getOffsetY() * 0.5, face.getOffsetZ() * 0.5);
+            if (eye.squaredDistanceTo(hit) <= maxDistSq) best = new Support(target, face, hit);
         }
         return best;
     }
@@ -567,7 +567,7 @@ public class StatuePrinter extends Module {
         Runnable action = () -> {
             if (!InvUtils.swap(hotbarSlot, true)) return;
             BlockHitResult hit = new BlockHitResult(s.hit(), s.face(), s.pos(), false);
-            mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hit);
+            mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hit);
             InvUtils.swapBack();
         };
 
@@ -585,8 +585,8 @@ public class StatuePrinter extends Module {
 
         int n = 0;
         for (Placement pl : all) {
-            var st = mc.level.getBlockState(pl.pos());
-            if (st.getBlock() != expectedBlock(pl.part()) && st.canBeReplaced()) {
+            var st = mc.world.getBlockState(pl.pos());
+            if (st.getBlock() != expectedBlock(pl.part()) && st.isReplaceable()) {
                 pl.tries = 0;
                 pl.lastTry = Integer.MIN_VALUE / 2;
                 queue.add(pl);
@@ -604,9 +604,9 @@ public class StatuePrinter extends Module {
     private void finish() {
         int missing = 0, wrong = 0;
         for (Placement pl : all) {
-            var st = mc.level.getBlockState(pl.pos());
+            var st = mc.world.getBlockState(pl.pos());
             if (st.getBlock() == expectedBlock(pl.part())) continue;
-            if (st.canBeReplaced()) missing++; else wrong++;
+            if (st.isReplaceable()) missing++; else wrong++;
         }
         if (missing > 0 || wrong > 0) tellWarn("Finished: %d missing, %d blocked by other blocks.", missing, wrong);
         else tellInfo("All blocks verified.");
@@ -631,7 +631,7 @@ public class StatuePrinter extends Module {
     private boolean refill(int part) {
         for (int slot = 9; slot <= 35; slot++) {
             if (slot == origSlot[part]) continue;   // holds the original hotbar item, leave it
-            ItemStack s = mc.player.getInventory().getItem(slot);
+            ItemStack s = mc.player.getInventory().getStack(slot);
             if (!s.isEmpty() && s.getItem() == chosen[part]) {
                 InvUtils.move().from(slot).toHotbar(part);
                 return true;
